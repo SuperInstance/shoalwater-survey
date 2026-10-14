@@ -22,9 +22,9 @@
   .sub{color:var(--dim);max-width:700px;font-size:16.5px}
   #mapwrap{position:relative;margin:22px 0 0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#071420}
   #mapwrap img.base{display:block;width:100%}
-  .pin{position:absolute;width:13px;height:13px;border-radius:50%;border:2px solid #04121c;
+  .pin{position:absolute;width:15px;height:15px;border-radius:50%;border:2px solid #04121c;
     background:var(--accent);cursor:pointer;transform:translate(-50%,-50%);padding:0}
-  .pin.old{background:#5d7f8f;width:9px;height:9px;opacity:.65}
+  .pin.old{background:#5d7f8f;width:11px;height:11px;opacity:.65}
   .pin:hover{outline:2px solid var(--ink)}
   .bar{margin:16px 0 0;background:var(--bg2);border:1px solid var(--line);border-radius:12px;
     padding:14px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
@@ -58,7 +58,7 @@
 <div class="bar">
   <span class="lbl">Time</span>
   <input type="range" id="timeSlider" min="0" max="0" step="1" value="0">
-  <span id="dateLabel">—</span>
+  <span id="dateLabel">loading the record…</span>
   <span id="pinCount" style="color:var(--dim);font-size:13.5px"></span>
 </div>
 

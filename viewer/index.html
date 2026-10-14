@@ -123,7 +123,7 @@ function render(uptoDay) {
 function show(p) {
   panel.style.display = 'flex';
   panel.innerHTML =
-    '<img src="data/' + p.frame + '" alt="Bottom portrait">' +
+    '<img src="' + DATA_BASE + p.frame + '" alt="Bottom portrait">' +
     '<div class="meta">' +
     '<div><b>' + p.t_utc.replace('T', ' ').slice(0, 16) + ' UTC</b> · ' + p.label + '</div>' +
     '<div>chart depth here: <b>' + (p.depth_est_m === null ? 'unfiled' : '~' + p.depth_est_m + ' m') +
@@ -135,7 +135,23 @@ function show(p) {
     '</div>';
 }
 
-fetch('data/pins.json').then(r => r.json()).then(data => {
+let DATA_BASE = 'data/';
+async function loadPins() {
+  try {
+    const r = await fetch('data/pins.json');
+    if (!r.ok) throw new Error('no local data');
+    return await r.json();
+  } catch (e) {
+    DATA_BASE = 'demo/';
+    const note = document.createElement('div');
+    note.style.cssText = 'color:var(--warn);font-size:13.5px;margin-top:8px';
+    note.textContent = 'Showing the house-test demo data (two mock passes around Black Rock). Real survey data stays on the surveyor\'s machine.';
+    document.querySelector('header').appendChild(note);
+    const r = await fetch('demo/pins.json');
+    return await r.json();
+  }
+}
+loadPins().then(data => {
   pins = data;
   days = [...new Set(pins.map(p => p.t_utc.slice(0, 10)))].sort();
   slider.max = Math.max(0, days.length - 1);

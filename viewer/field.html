@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shoalwater Survey — Field</title>
+<meta name="description" content="Your phone is the survey rig: GPS, camera and clock in one hand. Walk a pass, download the session, and watch your portraits land on the chart.">
+<style>
+  :root{
+    --bg:#0a1620; --bg2:#0e1f2e; --panel:#10293d; --line:#1e4258;
+    --ink:#dcecf5; --dim:#8fb2c6; --accent:#57c7e3; --good:#5fd68a;
+    --warn:#e8b34b; --bad:#e87a7a; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:820px;margin:0 auto;padding:0 16px}
+  header{padding:26px 0 2px}
+  .kicker{color:var(--accent);font-family:var(--mono);font-size:12px;letter-spacing:.22em;text-transform:uppercase}
+  h1{font-size:clamp(26px,5vw,36px);line-height:1.12;margin:8px 0 6px;font-weight:800}
+  .sub{color:var(--dim);max-width:640px}
+  #mapwrap{position:relative;margin:18px 0 0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#071420}
+  #mapwrap img.base{display:block;width:100%}
+  #me{position:absolute;width:16px;height:16px;border-radius:50%;background:var(--good);
+    border:3px solid #04121c;transform:translate(-50%,-50%);display:none;z-index:3}
+  #camwrap{margin:14px 0 0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#000}
+  video{display:block;width:100%;max-height:300px;object-fit:cover}
+  .bar{margin:14px 0 0;background:var(--bg2);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button{background:var(--accent);color:#04222f;border:0;border-radius:10px;padding:11px 18px;
+    font-size:15.5px;font-weight:700;cursor:pointer}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
+  button:disabled{opacity:.45;cursor:default}
+  .stat{font-family:var(--mono);font-size:13.5px;color:var(--dim)}
+  .stat b{color:var(--ink)}
+  #log{margin:14px 0 0;background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:12px 16px;font-family:var(--mono);font-size:13px;color:var(--dim);
+    max-height:170px;overflow:auto;white-space:pre-wrap}
+  footer{color:var(--dim);font-size:13.5px;padding:24px 0 38px}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="kicker">Shoalwater Survey · Field</div>
+  <h1>Your phone is the rig.</h1>
+  <p class="sub">GPS, camera and clock in one hand. Press <b>Start pass</b>, walk (or paddle) your
+  line, and the phone records the track and a portrait on the interval — with the clock offset
+  between GPS time and phone time measured, not assumed. Back inside, download the session and
+  import it into <a href="./">the viewer</a>: your portraits land on the chart where you stood.</p>
+</header>
+
+<div id="mapwrap">
+  <img class="base" src="backdrop.png" alt="Sitka Sound bathymetry render">
+  <div id="me"></div>
+</div>
+
+<div id="camwrap"><video id="cam" playsinline muted></video></div>
+
+<div class="bar">
+  <button id="startBtn">Start pass</button>
+  <button id="snapBtn" class="ghost" disabled>Portrait now</button>
+  <button id="stopBtn" disabled>End pass</button>
+  <span class="stat" id="stats">no pass yet</span>
+</div>
+
+<div class="bar">
+  <button id="homeBtn" class="ghost">Set home at my position</button>
+  <span class="stat" id="homeStat">home exclusion: not set (your launch stretch will record)</span>
+</div>
+
+<div class="bar">
+  <button id="dlBtn" disabled>Download session</button>
+  <span class="stat">The session file is yours — hand it to the ingest at home and the chart files the depths.</span>
+</div>
+
+<div id="log">waiting…</div>
+
+<footer>
+  Nothing leaves this phone until you download the session yourself. Home, once set, lives only
+  in this browser. Depths are filed later by the ingest against the full pack —
+  <a href="https://github.com/SuperInstance/shoalwater-survey">how it works</a>.
+</footer>
+</div>
+
+<script>
+const GEOREF = { west: -136.4131088338165, south: 56.76388789076536,
+                 east: -135.06004388278052, north: 57.422574559827524 };
+const FRAME_EVERY_S = 15;
+const $ = id => document.getElementById(id);
+const log = m => { const el = $('log'); el.textContent = m + '\n' + el.textContent; };
+const mlon = lat => 111320.0 * Math.cos(lat * Math.PI / 180);
+
+let watchId = null, timerId = null, stream = null;
+let pass = null, lastFix = null, offsets = [];
+
+function home() {
+  try { return JSON.parse(localStorage.getItem('surveyHome') || 'null'); }
+  catch (e) { return null; }
+}
+function nearHome(lat, lon) {
+  const h = home(); if (!h) return false;
+  const dx = (lon - h.lon) * mlon(h.lat), dy = (lat - h.lat) * 111320.0;
+  return Math.hypot(dx, dy) < (h.exclude_m || 250);
+}
+function refreshHomeStat() {
+  const h = home();
+  $('homeStat').textContent = h
+    ? 'home exclusion: ON (' + (h.exclude_m || 250) + ' m — fixes inside are never recorded)'
+    : 'home exclusion: not set (your launch stretch will record)';
+}
+refreshHomeStat();
+
+$('homeBtn').addEventListener('click', () => {
+  if (!lastFix) { log('no GPS fix yet — wait for the dot, then set home.'); return; }
+  localStorage.setItem('surveyHome', JSON.stringify(
+    { lat: lastFix.lat, lon: lastFix.lon, exclude_m: 250 }));
+  refreshHomeStat();
+  log('home set here; a 250 m quiet zone is now active.');
+});
+
+function placeDot(lat, lon) {
+  const x = (lon - GEOREF.west) / (GEOREF.east - GEOREF.west) * 100;
+  const y = (GEOREF.north - lat) / (GEOREF.north - GEOREF.south) * 100;
+  const me = $('me');
+  if (x < 0 || x > 100 || y < 0 || y > 100) { me.style.display = 'none'; return; }
+  me.style.display = 'block'; me.style.left = x + '%'; me.style.top = y + '%';
+}
+
+function stats() {
+  if (!pass) { $('stats').textContent = 'no pass yet'; return; }
+  $('stats').innerHTML = 'fixes <b>' + pass.track.length + '</b> · portraits <b>' +
+    pass.frames.length + '</b> · home-dropped <b>' + pass.dropped + '</b>';
+}
+
+function snap(reason) {
+  const v = $('cam');
+  if (!v.videoWidth || !lastFix) return;
+  const c = document.createElement('canvas');
+  const scale = 640 / v.videoWidth;
+  c.width = 640; c.height = Math.round(v.videoHeight * scale);
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  pass.frames.push({ laptop_t: new Date().toISOString(),
+                     jpeg_b64: c.toDataURL('image/jpeg', 0.82).split(',')[1] });
+  stats();
+  log('portrait ' + pass.frames.length + ' (' + reason + ')');
+}
+
+function onFix(pos) {
+  const { latitude: lat, longitude: lon } = pos.coords;
+  lastFix = { lat, lon };
+  placeDot(lat, lon);
+  offsets.push(Date.now() - pos.timestamp);
+  if (!pass) return;
+  if (nearHome(lat, lon)) { pass.dropped++; stats(); return; }
+  pass.track.push({ t_utc: new Date(pos.timestamp).toISOString(), lat, lon });
+  stats();
+}
+
+async function start() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(
+      { video: { facingMode: 'environment' }, audio: false });
+    $('cam').srcObject = stream;
+    await $('cam').play();
+  } catch (e) { log('camera unavailable: ' + e.message + ' — track-only pass.'); }
+  if (!('geolocation' in navigator)) { log('no geolocation on this device.'); return; }
+  pass = { session_id: new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + '-phone',
+           label: 'phone pass', source: 'phone', started: new Date().toISOString(),
+           track: [], frames: [], dropped: 0 };
+  offsets = [];
+  watchId = navigator.geolocation.watchPosition(onFix,
+    e => log('GPS: ' + e.message), { enableHighAccuracy: true, maximumAge: 1000 });
+  timerId = setInterval(() => snap('interval ' + FRAME_EVERY_S + 's'), FRAME_EVERY_S * 1000);
+  $('startBtn').disabled = true; $('stopBtn').disabled = false; $('snapBtn').disabled = false;
+  $('dlBtn').disabled = true;
+  log('pass started — walk your line. Portraits every ' + FRAME_EVERY_S + ' s.');
+  stats();
+}
+
+function stop() {
+  clearInterval(timerId);
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  const med = offsets.length ? offsets.sort((a, b) => a - b)[Math.floor(offsets.length / 2)] : 0;
+  pass.clock = { gps_is_truth: true, laptop_minus_gps_s: Math.round(med) / 1000,
+                 note: 'median device-minus-GPS offset across fixes' };
+  $('startBtn').disabled = false; $('stopBtn').disabled = true; $('snapBtn').disabled = true;
+  $('dlBtn').disabled = !pass.frames.length && !pass.track.length;
+  log('pass ended: ' + pass.track.length + ' fixes, ' + pass.frames.length +
+      ' portraits, clock offset ' + pass.clock.laptop_minus_gps_s + ' s.');
+}
+
+$('startBtn').addEventListener('click', start);
+$('stopBtn').addEventListener('click', stop);
+$('snapBtn').addEventListener('click', () => snap('manual'));
+$('dlBtn').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(pass)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'session-' + pass.session_id + '.json';
+  a.click();
+  log('session downloaded. Import it in the viewer, or keep it for the ingest.');
+});
+log('ready. Your position dot appears on the chart as soon as GPS fixes.');
+</script>
+</body>
+</html>

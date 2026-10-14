@@ -122,20 +122,35 @@ def main():
             for line in f:
                 done.add(json.loads(line)["pin_id"])
 
+    sources = []   # (sid, meta, track, frames, sdir-or-None)
+    for name in sorted(os.listdir(args.sessions)):
+        path = os.path.join(args.sessions, name)
+        if os.path.isdir(path):
+            with open(os.path.join(path, "session.json")) as f:
+                meta = json.load(f)
+            track = []
+            with open(os.path.join(path, "track.csv")) as f:
+                for row in csv.DictReader(f):
+                    track.append((datetime.fromisoformat(row["t_utc"]),
+                                  float(row["lat"]), float(row["lon"])))
+            frames = [json.loads(l) for l in open(os.path.join(path, "frames.jsonl"))]
+            sources.append((meta["session_id"], meta, track, frames, path))
+        elif name.endswith(".json"):
+            # a phone bundle from viewer/field.html: one file, base64 frames
+            with open(path) as f:
+                bundle = json.load(f)
+            meta = {"session_id": bundle["session_id"],
+                    "label": bundle.get("label", "phone pass"),
+                    "source": bundle.get("source", "phone"),
+                    "clock": bundle["clock"]}
+            track = [(datetime.fromisoformat(f["t_utc"]), float(f["lat"]),
+                      float(f["lon"])) for f in bundle["track"]]
+            sources.append((bundle["session_id"], meta, track,
+                            bundle["frames"], None))
+
     new_pins = 0
-    for sid in sorted(os.listdir(args.sessions)):
-        sdir = os.path.join(args.sessions, sid)
-        if not os.path.isdir(sdir):
-            continue
-        with open(os.path.join(sdir, "session.json")) as f:
-            meta = json.load(f)
+    for sid, meta, track, frames, sdir in sources:
         offset = meta["clock"]["laptop_minus_gps_s"]
-        track = []
-        with open(os.path.join(sdir, "track.csv")) as f:
-            for row in csv.DictReader(f):
-                track.append((datetime.fromisoformat(row["t_utc"]),
-                              float(row["lat"]), float(row["lon"])))
-        frames = [json.loads(l) for l in open(os.path.join(sdir, "frames.jsonl"))]
         for i, fr in enumerate(frames):
             pin_id = f"{sid}:{i:03d}"
             if pin_id in done:
@@ -146,8 +161,16 @@ def main():
             depth, bottom, conf = pack.sample(lat, lon)
             dest_dir = os.path.join(args.out, "frames", sid)
             os.makedirs(dest_dir, exist_ok=True)
-            dest = os.path.join(dest_dir, os.path.basename(fr["file"]))
-            shutil.copyfile(os.path.join(sdir, fr["file"]), dest)
+            if fr.get("jpeg_b64"):
+                import base64
+                fname = f"frame-{i:03d}.jpg"
+                dest = os.path.join(dest_dir, fname)
+                with open(dest, "wb") as out:
+                    out.write(base64.b64decode(fr["jpeg_b64"]))
+                fr = dict(fr, file=fname)
+            else:
+                dest = os.path.join(dest_dir, os.path.basename(fr["file"]))
+                shutil.copyfile(os.path.join(sdir, fr["file"]), dest)
             pin = {
                 "pin_id": pin_id, "session": sid, "label": meta.get("label", ""),
                 "t_utc": true_t.isoformat(), "lat": round(lat, 7),

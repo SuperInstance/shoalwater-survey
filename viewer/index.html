@@ -64,6 +64,12 @@
 
 <div id="panel"></div>
 
+<div class="bar">
+  <span class="lbl">Your pass</span>
+  <input type="file" id="importFile" accept=".json,application/json" style="color:var(--dim);font-size:14px">
+  <span style="color:var(--dim);font-size:13.5px">Import a session from <a href="field.html">Field</a> and your portraits land on this chart where you stood. Depths get filed by the ingest at home.</span>
+</div>
+
 <footer>
   Survey data is local by default and published pass by pass, deliberately. ·
   Depths are the chart's rough estimates at each pin — the portraits are the truth being collected. ·
@@ -122,8 +128,9 @@ function render(uptoDay) {
 
 function show(p) {
   panel.style.display = 'flex';
+  const src = /^(blob:|https?:|data:)/.test(p.frame) ? p.frame : DATA_BASE + p.frame;
   panel.innerHTML =
-    '<img src="' + DATA_BASE + p.frame + '" alt="Bottom portrait">' +
+    '<img src="' + src + '" alt="Bottom portrait">' +
     '<div class="meta">' +
     '<div><b>' + p.t_utc.replace('T', ' ').slice(0, 16) + ' UTC</b> · ' + p.label + '</div>' +
     '<div>chart depth here: <b>' + (p.depth_est_m === null ? 'unfiled' : '~' + p.depth_est_m + ' m') +
@@ -151,14 +158,83 @@ async function loadPins() {
     return await r.json();
   }
 }
-loadPins().then(data => {
-  pins = data;
+function rebuildDays(selectLast) {
   days = [...new Set(pins.map(p => p.t_utc.slice(0, 10)))].sort();
   slider.max = Math.max(0, days.length - 1);
-  slider.value = slider.max;
-  const upd = () => { dateLabel.textContent = days[slider.value] || '—'; render(days[slider.value]); };
-  slider.addEventListener('input', upd);
-  upd();
+  if (selectLast) slider.value = slider.max;
+  dateLabel.textContent = days[slider.value] || '—';
+  render(days[slider.value]);
+}
+slider.addEventListener('input', () => {
+  dateLabel.textContent = days[slider.value] || '—';
+  render(days[slider.value]);
+});
+
+function interp(track, tMs) {
+  if (!track.length) return null;
+  if (tMs <= track[0].t) return [track[0].lat, track[0].lon];
+  if (tMs >= track[track.length - 1].t) return [track[track.length - 1].lat, track[track.length - 1].lon];
+  for (let i = 0; i < track.length - 1; i++) {
+    const a = track[i], b = track[i + 1];
+    if (a.t <= tMs && tMs <= b.t) {
+      const f = b.t > a.t ? (tMs - a.t) / (b.t - a.t) : 0;
+      return [a.lat + (b.lat - a.lat) * f, a.lon + (b.lon - a.lon) * f];
+    }
+  }
+  return [track[track.length - 1].lat, track[track.length - 1].lon];
+}
+
+function importSession(s) {
+  const offset = (s.clock && s.clock.laptop_minus_gps_s) || 0;
+  const track = (s.track || []).map(f => (
+    { t: Date.parse(f.t_utc || f[0]), lat: f.lat !== undefined ? f.lat : f[1],
+      lon: f.lon !== undefined ? f.lon : f[2] }));
+  let added = 0;
+  (s.frames || []).forEach((fr, i) => {
+    const trueMs = Date.parse(fr.laptop_t) - offset * 1000;
+    const at = interp(track, trueMs);
+    if (!at) return;
+    let frame = fr.file || '';
+    if (fr.jpeg_b64) {
+      const bin = atob(fr.jpeg_b64);
+      const arr = new Uint8Array(bin.length);
+      for (let j = 0; j < bin.length; j++) arr[j] = bin.charCodeAt(j);
+      frame = URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));
+    }
+    pins.push({ pin_id: (s.session_id || 'import') + ':' + i, session: s.session_id || 'import',
+      label: s.label || 'imported pass', t_utc: new Date(trueMs).toISOString(),
+      lat: at[0], lon: at[1], frame: frame, depth_est_m: null, shelf: 'unfiled',
+      bottom_type: null, confidence: null, source: s.source || 'import' });
+    added++;
+  });
+  if (added) { rebuildDays(true); }
+  return added;
+}
+
+document.getElementById('importFile').addEventListener('change', ev => {
+  const f = ev.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const n = importSession(JSON.parse(r.result));
+      pinCount.textContent = n + ' portraits imported from your pass';
+    } catch (e) { pinCount.textContent = 'that file did not import: ' + e.message; }
+  };
+  r.readAsText(f);
+});
+
+loadPins().then(async data => {
+  pins = data;
+  rebuildDays(true);
+  const imp = new URLSearchParams(location.search).get('import');
+  if (imp) {
+    try {
+      const r = await fetch(imp);
+      const n = importSession(await r.json());
+      if (n) pinCount.textContent = n + ' portraits imported from the linked pass';
+    } catch (e) { /* a bad import link costs the base map nothing */ }
+  }
 });
 </script>
 </body>

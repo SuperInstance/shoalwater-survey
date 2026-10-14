@@ -41,6 +41,18 @@ Two synthetic paddles around Black Rock, a month apart, with a simulated
 47-second camera-clock error for the ingest to correct. If the pins land
 and the slider scrubs, the pipeline is proven end to end.
 
+## Or just use your phone (Field mode)
+
+`viewer/field.html` — also live at the Pages site under `/viewer/field.html` —
+turns a phone into the whole rig: GPS, camera and clock in one hand. Open it,
+press **Start pass**, walk the dock or the garden (house test) or paddle your
+line, and it records the track plus a portrait every 15 seconds, measuring
+the GPS-vs-phone clock offset as it goes. **End pass**, **Download session**,
+then import the file in the viewer: your portraits land on the chart where
+you stood. Set home on the field page and a 250 m quiet zone around it never
+records at all. The same session file feeds `rig/ingest.py` at home, which
+files the chart's depths against your portraits.
+
 ## Kayak day
 
 1. Clone this repo on the laptop; clone `shoalwater-full` beside it (the ingest's chart).

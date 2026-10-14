@@ -1,0 +1,6 @@
+# Survey data is local by default. Publishing a pass is deliberate.
+sessions/
+survey/
+rig.local.json
+viewer/data/
+__pycache__/

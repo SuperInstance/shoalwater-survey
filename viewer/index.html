@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shoalwater Survey — the Sound, witnessed over time</title>
+<meta name="description" content="Bottom portraits from kayak survey passes over Sitka Sound, pinned where they were taken and kept in versions: slide time and watch a reef bloom and fall.">
+<style>
+  :root{
+    --bg:#0a1620; --bg2:#0e1f2e; --panel:#10293d; --line:#1e4258;
+    --ink:#dcecf5; --dim:#8fb2c6; --accent:#57c7e3; --good:#5fd68a;
+    --warn:#e8b34b; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 18px}
+  header{padding:34px 0 4px}
+  .kicker{color:var(--accent);font-family:var(--mono);font-size:12px;letter-spacing:.22em;text-transform:uppercase}
+  h1{font-size:clamp(28px,4.6vw,42px);line-height:1.12;margin:10px 0 8px;font-weight:800}
+  h1 .thin{color:var(--dim);font-weight:300}
+  .sub{color:var(--dim);max-width:700px;font-size:16.5px}
+  #mapwrap{position:relative;margin:22px 0 0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#071420}
+  #mapwrap img.base{display:block;width:100%}
+  .pin{position:absolute;width:13px;height:13px;border-radius:50%;border:2px solid #04121c;
+    background:var(--accent);cursor:pointer;transform:translate(-50%,-50%);padding:0}
+  .pin.old{background:#5d7f8f;width:9px;height:9px;opacity:.65}
+  .pin:hover{outline:2px solid var(--ink)}
+  .bar{margin:16px 0 0;background:var(--bg2);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  .bar .lbl{color:var(--dim);font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+  input[type=range]{flex:1;min-width:200px;accent-color:var(--accent)}
+  #dateLabel{font-family:var(--mono);font-size:14px}
+  #panel{margin:16px 0 0;background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:18px 20px;display:none;gap:18px;flex-wrap:wrap}
+  #panel img{width:min(420px,100%);border-radius:10px;border:1px solid var(--line)}
+  #panel .meta{font-size:15px;color:var(--dim);min-width:220px}
+  #panel .meta b{color:var(--ink)}
+  footer{color:var(--dim);font-size:13.5px;padding:28px 0 40px}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="kicker">Shoalwater Survey</div>
+  <h1>The Sound, witnessed — <span class="thin">and kept in versions</span></h1>
+  <p class="sub">Each pin is a bottom portrait: a camera lowered from a kayak, filed where the
+  GPS swears it was, with the chart's rough depth for that spot. Passes are never overwritten —
+  slide time back and the older portraits return. The backdrop is the Deployment 1 render;
+  pin placement on it is approximate in v1.</p>
+</header>
+
+<div id="mapwrap">
+  <img class="base" src="backdrop.png" alt="Sitka Sound bathymetry render, full extent">
+</div>
+
+<div class="bar">
+  <span class="lbl">Time</span>
+  <input type="range" id="timeSlider" min="0" max="0" step="1" value="0">
+  <span id="dateLabel">—</span>
+  <span id="pinCount" style="color:var(--dim);font-size:13.5px"></span>
+</div>
+
+<div id="panel"></div>
+
+<footer>
+  Survey data is local by default and published pass by pass, deliberately. ·
+  Depths are the chart's rough estimates at each pin — the portraits are the truth being collected. ·
+  <a href="https://github.com/SuperInstance/shoalwater-full">The full pack</a> ·
+  <a href="https://github.com/SuperInstance/shoalwater">The game</a>
+</footer>
+</div>
+
+<script>
+const GEOREF = { west: -136.4131088338165, south: 56.76388789076536,
+                 east: -135.06004388278052, north: 57.422574559827524 };
+const wrap = document.getElementById('mapwrap');
+const slider = document.getElementById('timeSlider');
+const dateLabel = document.getElementById('dateLabel');
+const pinCount = document.getElementById('pinCount');
+const panel = document.getElementById('panel');
+let pins = [], days = [];
+
+function xy(lat, lon) {
+  const x = (lon - GEOREF.west) / (GEOREF.east - GEOREF.west) * 100;
+  const y = (GEOREF.north - lat) / (GEOREF.north - GEOREF.south) * 100;
+  return [x, y];
+}
+
+function render(uptoDay) {
+  wrap.querySelectorAll('.pin').forEach(e => e.remove());
+  const sessionsByDay = {};
+  for (const p of pins) {
+    const d = p.t_utc.slice(0, 10);
+    if (d <= uptoDay) (sessionsByDay[p.session] = sessionsByDay[p.session] || new Set()).add(d);
+  }
+  const latestDayBySession = {};
+  for (const p of pins) {
+    const d = p.t_utc.slice(0, 10);
+    if (d <= uptoDay && (!latestDayBySession[p.session] || d > latestDayBySession[p.session]))
+      latestDayBySession[p.session] = d;
+  }
+  let shown = 0;
+  for (const p of pins) {
+    const d = p.t_utc.slice(0, 10);
+    if (d > uptoDay) continue;
+    const b = document.createElement('button');
+    b.className = 'pin';
+    // a pin superseded by a newer pass over the same water draws dimmer
+    const isOld = d < uptoDay && pins.some(q => q.session !== p.session && q.t_utc.slice(0,10) > d && q.t_utc.slice(0,10) <= uptoDay && Math.abs(q.lat-p.lat) < 0.004 && Math.abs(q.lon-p.lon) < 0.006);
+    if (isOld) b.className = 'pin old';
+    const [x, y] = xy(p.lat, p.lon);
+    b.style.left = x + '%'; b.style.top = y + '%';
+    b.title = p.t_utc.slice(0, 10) + ' · ' + (p.depth_est_m === null ? 'unfiled' : '~' + p.depth_est_m + ' m');
+    b.addEventListener('click', () => show(p));
+    wrap.appendChild(b);
+    shown++;
+  }
+  pinCount.textContent = shown + ' portraits on the map';
+}
+
+function show(p) {
+  panel.style.display = 'flex';
+  panel.innerHTML =
+    '<img src="data/' + p.frame + '" alt="Bottom portrait">' +
+    '<div class="meta">' +
+    '<div><b>' + p.t_utc.replace('T', ' ').slice(0, 16) + ' UTC</b> · ' + p.label + '</div>' +
+    '<div>chart depth here: <b>' + (p.depth_est_m === null ? 'unfiled' : '~' + p.depth_est_m + ' m') +
+    '</b> · shelf <b>' + p.shelf + '</b></div>' +
+    '<div>chart calls the bottom: <b>' + (p.bottom_type || '—') + '</b> · confidence <b>' +
+    (p.confidence === null || p.confidence === undefined ? '—' : p.confidence) + '</b></div>' +
+    '<div style="margin-top:8px">The portrait is the ground truth this pin exists to collect — ' +
+    'the chart\'s words above are what it gets checked against, pass after pass.</div>' +
+    '</div>';
+}
+
+fetch('data/pins.json').then(r => r.json()).then(data => {
+  pins = data;
+  days = [...new Set(pins.map(p => p.t_utc.slice(0, 10)))].sort();
+  slider.max = Math.max(0, days.length - 1);
+  slider.value = slider.max;
+  const upd = () => { dateLabel.textContent = days[slider.value] || '—'; render(days[slider.value]); };
+  slider.addEventListener('input', upd);
+  upd();
+});
+</script>
+</body>
+</html>
